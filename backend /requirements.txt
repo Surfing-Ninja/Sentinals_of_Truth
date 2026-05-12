@@ -1,0 +1,8 @@
+requests
+python-dotenv
+langgraph
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+chromadb
