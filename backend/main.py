@@ -16,7 +16,7 @@ def get_allowed_origins():
 
     raw_origins = os.getenv(
         "ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173"
+        "http://localhost:5173,http://127.0.0.1:5173,https://sentinals-of-truth.vercel.app"
     )
 
     if raw_origins.strip() == "*":
