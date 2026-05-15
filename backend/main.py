@@ -12,31 +12,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-def get_allowed_origins():
-
-    raw_origins = os.getenv(
-        "ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,https://sentinals-of-truth.vercel.app"
-    )
-
-    if raw_origins.strip() == "*":
-
-        return ["*"]
-
-    return [
-        origin.strip()
-        for origin in raw_origins.split(",")
-        if origin.strip()
-    ]
-
-
-allowed_origins = get_allowed_origins()
-allow_credentials = allowed_origins != ["*"]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=allow_credentials,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
