@@ -10,7 +10,16 @@ from models import ClaimRecord, ReviewQueueRecord
 
 Base.metadata.create_all(bind=engine)
 
+from fastapi import FastAPI, Request
+
 app = FastAPI()
+
+@app.middleware("http")
+async def rewrite_double_slashes(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if "//" in path:
+        request.scope["path"] = path.replace("//", "/")
+    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,
