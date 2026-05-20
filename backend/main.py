@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -9,8 +9,6 @@ from graph import app_graph
 from models import ClaimRecord, ReviewQueueRecord
 
 Base.metadata.create_all(bind=engine)
-
-from fastapi import FastAPI, Request
 
 app = FastAPI()
 
@@ -68,35 +66,39 @@ def submit_claim(claim: Claim):
         and investigation_round >= max_rounds
     )
 
+    verdict = verification_report.get("verdict", "DISPUTED")
+
     if decision == "REDUNDANT":
 
-        status = "REDUNDANT"
+        archive_action = "ALREADY_ARCHIVED"
 
     elif decision == "SEMANTIC_DUPLICATE":
 
-        status = "SEMANTIC_DUPLICATE"
+        archive_action = "DUPLICATE_DETECTED"
 
     elif decision == "CONFLICT":
 
-        status = "HUMAN_REVIEW" if conflict_exhausted else "DISPUTED"
+        archive_action = "ESCALATED" if conflict_exhausted else "UNDER_REVIEW"
 
     else:
 
-        status = verification_report.get("verdict")
-
-        if status not in {"VERIFIED", "FAKE", "DISPUTED"}:
-
-            status = "VERIFIED" if verification_report["verified"] else "DISPUTED"
+        archive_action = "ARCHIVED"
 
     if decision == "CONFLICT":
 
-        contradiction_note = "Contradiction detected against existing archive."
+        if conflict_exhausted:
+            verdict = "DISPUTED"
+
+        contradiction_note = (
+            f"Contradiction detected against archived entry: "
+            f"{archivist_result.get('conflicting_claim', 'unknown')}."
+        )
         analysis_steps = list(verification_report.get("analysis_steps", []))
         escalation_note = None
 
         analysis_steps.append(
             {
-                "step": "contradiction",
+                "step": "archive_conflict",
                 "detail": contradiction_note
             }
         )
@@ -105,7 +107,7 @@ def submit_claim(claim: Claim):
 
             escalation_note = (
                 "Escalated to human review after "
-                f"{investigation_round} rounds."
+                f"{investigation_round} investigation rounds."
             )
 
             analysis_steps.append(
@@ -117,24 +119,20 @@ def submit_claim(claim: Claim):
 
         verification_report["analysis_steps"] = analysis_steps
 
-        current_confidence = min(verification_report["confidence"], 95)
+        current_confidence = verification_report["confidence"]
         verification_report["confidence"] = max(
             15,
-            current_confidence - 35
+            min(current_confidence - 20, 50)
         )
 
-        reason_suffix = contradiction_note
-
-        if escalation_note:
-
-            reason_suffix = f"{reason_suffix} {escalation_note}"
-
         verification_report["reason"] = (
-            f"{verification_report['reason']} {reason_suffix}"
+            f"{verification_report['reason']} "
+            f"Note: {contradiction_note}"
         )
 
     analysis_payload = {
-        "status": status,
+        "verdict": verdict,
+        "archive_action": archive_action,
         "confidence": verification_report["confidence"],
         "reason": verification_report["reason"],
         "sources": verification_report["sources"],
@@ -161,6 +159,15 @@ def submit_claim(claim: Claim):
             **analysis_payload
         }
 
+    if decision == "SEMANTIC_DUPLICATE":
+
+        return {
+            "message": archivist_result["message"],
+            "decision": decision,
+            "matched_claim": archivist_result.get("matched_claim"),
+            **analysis_payload
+        }
+
     if decision == "CONFLICT":
 
         sources = ", ".join(verification_report["sources"])
@@ -175,7 +182,7 @@ def submit_claim(claim: Claim):
 
             existing_review.decision = decision
             existing_review.message = archivist_result["message"]
-            existing_review.verification_status = status
+            existing_review.verification_status = verdict
             existing_review.confidence_score = verification_report["confidence"]
             existing_review.verification_reason = verification_report["reason"]
             existing_review.sources = sources
@@ -192,7 +199,7 @@ def submit_claim(claim: Claim):
                 claim_text=claim.text,
                 decision=decision,
                 message=archivist_result["message"],
-                verification_status=status,
+                verification_status=verdict,
                 confidence_score=verification_report["confidence"],
                 verification_reason=verification_report["reason"],
                 sources=sources,
@@ -213,7 +220,7 @@ def submit_claim(claim: Claim):
 
     new_claim = ClaimRecord(
         claim_text=claim.text,
-        verification_status=status,
+        verification_status=verdict,
         confidence_score=verification_report["confidence"],
         verification_reason=verification_report["reason"],
         sources=", ".join(verification_report["sources"])
@@ -226,7 +233,7 @@ def submit_claim(claim: Claim):
     db.refresh(new_claim)
 
     return {
-        "message": "Claim archived successfully",
+        "message": "Claim verified and archived.",
         "decision": decision,
         "claim": new_claim.claim_text,
         **analysis_payload
@@ -258,7 +265,7 @@ def get_review_queue():
                 "message": item.message,
                 "status": item.status,
                 "escalation_status": item.status,
-                "verification_status": item.verification_status,
+                "verdict": item.verification_status,
                 "confidence": item.confidence_score,
                 "reason": item.verification_reason,
                 "sources": sources,

@@ -13,14 +13,58 @@ HIGH_TRUST_DOMAINS = [
     "reuters.com",
     "apnews.com",
     "bbc.com",
-    "britannica.com"
+    "britannica.com",
+    "nasa.gov",
+    "isro.gov.in",
+    "who.int",
+    "un.org",
+    "nature.com",
+    "sciencedirect.com",
+    "theguardian.com",
+    "nytimes.com",
+    "washingtonpost.com",
+    "aljazeera.com",
+]
+
+MEDIUM_TRUST_DOMAINS = [
+    "wikipedia.org",
+    "hindustantimes.com",
+    "ndtv.com",
+    "timesofindia.indiatimes.com",
+    "thehindu.com",
+    "livemint.com",
+    "economictimes.indiatimes.com",
+    "scroll.in",
+    "firstpost.com",
+    "news18.com",
+    "cnbc.com",
+    "cnn.com",
+    "foxnews.com",
+    "nbcnews.com",
 ]
 
 BLOG_DOMAINS = [
     "medium.com",
     "substack.com",
     "wordpress.com",
-    "blogspot.com"
+    "blogspot.com",
+]
+
+LOW_TRUST_DOMAINS = [
+    "reddit.com",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "instagram.com",
+    "tiktok.com",
+    "quora.com",
+    "pinterest.com",
+    "tumblr.com",
+]
+
+YOUTUBE_DOMAINS = [
+    "youtube.com",
+    "youtu.be",
 ]
 
 KNOWN_FALSEHOODS = [
@@ -28,28 +72,59 @@ KNOWN_FALSEHOODS = [
     "flat earth",
     "earth is flat",
     "5g causes covid",
-    "aliens elected prime minister"
+    "aliens elected prime minister",
+    "vaccines cause autism",
+    "birds aren't real",
 ]
 
 CONTRADICTION_KEYWORDS = [
-    "debunk",
-    "false",
     "hoax",
     "myth",
     "not true",
     "fake",
     "misinformation",
     "no evidence",
+    "incorrect",
+    "misleading",
+    "conspiracy",
+    "disproven",
+    "baseless",
+    "unfounded",
+]
+
+NEUTRALIZER_PATTERNS = [
+    "debunked",
+    "debunk",
     "fact check",
     "factcheck",
-    "incorrect",
-    "misleading"
+    "claims are false",
+    "claims are misleading",
+    "is not true that",
+    "proven false",
+    "ruled false",
+]
+
+CONFIRMATION_KEYWORDS = [
+    "confirmed",
+    "successfully",
+    "achieved",
+    "accomplished",
+    "landed",
+    "launched",
+    "announced",
+    "official",
+    "historic",
+    "milestone",
+    "breakthrough",
+    "approved",
+    "verified",
+    "established",
 ]
 
 
 def search_claim_online(
     claim_text: str,
-    max_results: int = 3,
+    max_results: int = 5,
     search_depth: str = "basic"
 ):
 
@@ -108,39 +183,51 @@ def score_source(url: str):
 
     if not url:
 
-        return 40, "low"
+        return 30, "low"
 
     domain = normalize_domain(url)
 
     if domain.endswith(".gov") or ".gov." in domain:
 
-        score = 95
+        score = 92
 
     elif domain.endswith(".edu") or ".edu." in domain:
 
-        score = 90
+        score = 88
+
+    elif domain.endswith(".org") and not domain_matches(domain, LOW_TRUST_DOMAINS):
+
+        score = 75
 
     elif domain_matches(domain, HIGH_TRUST_DOMAINS):
 
-        score = 80
+        score = 85
 
-    elif "wikipedia.org" in domain:
+    elif domain_matches(domain, MEDIUM_TRUST_DOMAINS):
 
-        score = 70
+        score = 72
+
+    elif domain_matches(domain, YOUTUBE_DOMAINS):
+
+        score = 35
+
+    elif domain_matches(domain, LOW_TRUST_DOMAINS):
+
+        score = 25
 
     elif domain_matches(domain, BLOG_DOMAINS) or "blog" in domain:
 
-        score = 50
+        score = 45
 
     else:
 
-        score = 40
+        score = 55
 
-    if score >= 90:
+    if score >= 80:
 
         label = "high"
 
-    elif score >= 70:
+    elif score >= 60:
 
         label = "medium"
 
@@ -197,14 +284,14 @@ def cross_check_sources(breakdown, total_sources):
 
         return {
             "consensus": "strong",
-            "notes": "Multiple high-credibility sources support the claim."
+            "notes": "Multiple high-credibility sources agree on the claim."
         }
 
     if breakdown["high"] >= 1 and breakdown["medium"] >= 1:
 
         return {
             "consensus": "moderate",
-            "notes": "Mixed high/medium sources support the claim."
+            "notes": "Mix of high and medium credibility sources support the claim."
         }
 
     if breakdown["high"] == 0 and breakdown["medium"] >= 2:
@@ -231,42 +318,76 @@ def compute_confidence(scores, total_sources, breakdown, support_count, contradi
 
     if total_sources == 0:
 
-        return 15
+        return 10
 
     average = sum(scores) / total_sources
-    score = average + min(total_sources * 5, 20)
 
-    if support_count >= 2:
+    base_score = average * 0.5
 
-        score += 20
+    source_bonus = min(total_sources * 4, 15)
 
-    if contradiction_count == 0:
+    if support_count >= 3:
 
-        score += 15
+        support_bonus = 25
+
+    elif support_count >= 2:
+
+        support_bonus = 18
+
+    elif support_count >= 1:
+
+        support_bonus = 10
+
+    else:
+
+        support_bonus = 0
 
     trusted_count = breakdown["high"] + breakdown["medium"]
 
-    if trusted_count >= 2:
+    if trusted_count >= 3:
 
-        score += 20
+        trust_bonus = 22
+
+    elif trusted_count >= 2:
+
+        trust_bonus = 16
 
     elif trusted_count == 1:
 
-        score += 10
+        trust_bonus = 8
+
+    else:
+
+        trust_bonus = 0
+
+    if contradiction_count == 0 and support_count >= 1:
+
+        consistency_bonus = 10
+
+    elif contradiction_count == 0:
+
+        consistency_bonus = 5
+
+    else:
+
+        consistency_bonus = 0
+
+    score = base_score + source_bonus + support_bonus + trust_bonus + consistency_bonus
 
     if breakdown["low"] == total_sources:
 
-        score -= 10
+        score -= 15
 
     if contradiction_count > 0:
 
-        score -= 40
+        penalty = min(contradiction_count * 15, 40)
+        score -= penalty
 
     if total_sources == 1:
 
-        score -= 10
+        score -= 8
 
-    return max(15, min(95, round(score)))
+    return max(10, min(95, round(score)))
 
 
 def extract_result_text(item):
@@ -281,11 +402,34 @@ def extract_result_text(item):
     return " ".join([part for part in parts if part]).lower()
 
 
+def text_has_confirmation(text):
+
+    return any(keyword in text for keyword in CONFIRMATION_KEYWORDS)
+
+
+def text_has_contradiction(text):
+
+    return any(keyword in text for keyword in CONTRADICTION_KEYWORDS)
+
+
 def is_contradiction(item):
 
     text = extract_result_text(item)
 
-    return any(keyword in text for keyword in CONTRADICTION_KEYWORDS)
+    has_negative = text_has_contradiction(text)
+    has_positive = text_has_confirmation(text)
+
+    has_neutralizer = any(pattern in text for pattern in NEUTRALIZER_PATTERNS)
+
+    if has_neutralizer:
+
+        return False
+
+    if has_negative and has_positive:
+
+        return False
+
+    return has_negative
 
 
 def count_support(results):
@@ -311,6 +455,42 @@ def detect_known_falsehood(claim_text: str):
     return None
 
 
+def build_reason(verdict, support_count, contradiction_count, breakdown, total_sources, credibility_average):
+
+    trusted_count = breakdown["high"] + breakdown["medium"]
+
+    if verdict == "SUPPORTED":
+
+        if trusted_count >= 2:
+            return f"Multiple reliable sources ({trusted_count} high/medium credibility) confirm this claim."
+        elif trusted_count == 1:
+            return f"Claim supported by {support_count} source(s), including trusted outlets."
+        else:
+            return f"Claim supported by {support_count} source(s) with average credibility of {credibility_average}."
+
+    elif verdict == "FALSE":
+
+        return "Evidence contradicts this claim across multiple sources."
+
+    elif verdict == "DISPUTED":
+
+        if contradiction_count > 0 and support_count > 0:
+            return f"Mixed evidence: {support_count} supporting and {contradiction_count} contradicting source(s) found."
+        elif contradiction_count > 0:
+            return f"Contradictory evidence found in {contradiction_count} source(s)."
+        else:
+            return "Evidence is inconclusive with mixed source credibility."
+
+    elif verdict == "INSUFFICIENT_EVIDENCE":
+
+        if total_sources == 0:
+            return "No sources found to verify this claim."
+        else:
+            return f"Only {total_sources} low-quality source(s) found. Insufficient evidence to make a determination."
+
+    return "Unable to determine claim veracity."
+
+
 def investigate_claim(claim_text: str, investigation_round: int = 1):
 
     falsehood_match = detect_known_falsehood(claim_text)
@@ -320,16 +500,16 @@ def investigate_claim(claim_text: str, investigation_round: int = 1):
         return {
             "claim": claim_text,
             "verified": False,
-            "verdict": "FAKE",
-            "confidence": 15,
-            "reason": "Known misinformation pattern detected.",
+            "verdict": "FALSE",
+            "confidence": 92,
+            "reason": f"Known misinformation pattern detected: '{falsehood_match}'.",
             "sources": [],
             "support_count": 0,
             "contradiction_count": 1,
             "analysis_steps": [
                 {
-                    "step": "contradiction",
-                    "detail": f"Matched falsehood pattern: {falsehood_match}."
+                    "step": "pattern_match",
+                    "detail": f"Matched known falsehood pattern: '{falsehood_match}'."
                 }
             ],
             "credibility_breakdown": {
@@ -341,13 +521,13 @@ def investigate_claim(claim_text: str, investigation_round: int = 1):
             "source_assessment": [],
             "cross_check": {
                 "consensus": "none",
-                "notes": "No sources collected for known falsehood."
+                "notes": "No external sources needed for known falsehood."
             },
             "contradiction_detected": True,
             "investigation_round": investigation_round
         }
 
-    max_results = 3 if investigation_round <= 1 else 5
+    max_results = 5 if investigation_round <= 1 else 7
 
     search_results = search_claim_online(
         claim_text,
@@ -361,16 +541,16 @@ def investigate_claim(claim_text: str, investigation_round: int = 1):
         return {
             "claim": claim_text,
             "verified": False,
-            "verdict": "DISPUTED",
-            "confidence": 15,
-            "reason": "Search failed or API key missing.",
+            "verdict": "INSUFFICIENT_EVIDENCE",
+            "confidence": 10,
+            "reason": "Source retrieval failed. Unable to verify.",
             "sources": [],
             "support_count": 0,
             "contradiction_count": 0,
             "analysis_steps": [
                 {
-                    "step": "search",
-                    "detail": "Tavily search failed or API key is missing."
+                    "step": "retrieval",
+                    "detail": "Source retrieval failed or API key is missing."
                 }
             ],
             "credibility_breakdown": {
@@ -388,7 +568,7 @@ def investigate_claim(claim_text: str, investigation_round: int = 1):
             "investigation_round": investigation_round
         }
 
-    contradiction_query = f"{claim_text} debunked"
+    contradiction_query = f"{claim_text} debunked OR false OR hoax"
     contradiction_results = []
 
     contradiction_search = search_claim_online(
@@ -427,36 +607,72 @@ def investigate_claim(claim_text: str, investigation_round: int = 1):
         contradiction_count
     )
 
-    if contradiction_detected:
+    if total_sources == 0:
 
-        verdict = "FAKE" if support_count == 0 else "DISPUTED"
+        verdict = "INSUFFICIENT_EVIDENCE"
+
+    elif contradiction_detected and support_count == 0:
+
+        verdict = "FALSE"
+
+    elif contradiction_detected and support_count > 0:
+
+        if contradiction_count > support_count:
+            verdict = "FALSE" if confidence < 35 else "DISPUTED"
+        else:
+            verdict = "DISPUTED" if confidence < 70 else "SUPPORTED"
+
+    elif support_count >= 2 and confidence >= 65:
+
+        verdict = "SUPPORTED"
+
+    elif confidence >= 70:
+
+        verdict = "SUPPORTED"
+
+    elif confidence >= 40:
+
+        verdict = "DISPUTED"
+
+    elif breakdown["low"] == total_sources and total_sources <= 2:
+
+        verdict = "INSUFFICIENT_EVIDENCE"
 
     else:
 
-        verdict = "VERIFIED" if confidence >= 70 else "DISPUTED"
+        verdict = "DISPUTED"
 
-    verified = verdict == "VERIFIED"
+    verified = verdict == "SUPPORTED"
+
+    reason = build_reason(
+        verdict,
+        support_count,
+        contradiction_count,
+        breakdown,
+        total_sources,
+        credibility_average
+    )
 
     steps = [
         {
-            "step": "search",
-            "detail": f"Collected {total_sources} sources from Tavily."
+            "step": "retrieval",
+            "detail": f"Retrieved {total_sources} sources via web search."
         },
         {
-            "step": "contradiction_search",
+            "step": "credibility_analysis",
             "detail": (
-                "Debunk query returned "
-                f"{len(contradiction_results)} results."
+                "Source credibility breakdown — "
+                f"high: {breakdown['high']}, "
+                f"medium: {breakdown['medium']}, "
+                f"low: {breakdown['low']}. "
+                f"Average credibility: {credibility_average}."
             )
         },
         {
-            "step": "analyze",
+            "step": "contradiction_scan",
             "detail": (
-                "Credibility breakdown - "
-                f"high: {breakdown['high']}, "
-                f"medium: {breakdown['medium']}, "
-                f"low: {breakdown['low']}, "
-                f"average score: {credibility_average}."
+                f"Scanned {len(contradiction_results)} debunk results. "
+                f"Found {contradiction_count} contradiction signal(s)."
             )
         },
         {
@@ -466,27 +682,15 @@ def investigate_claim(claim_text: str, investigation_round: int = 1):
         {
             "step": "consensus",
             "detail": (
-                "Support signals: "
-                f"{support_count}. Contradictions: {contradiction_count}."
+                f"Supporting signals: {support_count}. "
+                f"Contradicting signals: {contradiction_count}."
             )
         },
         {
-            "step": "confidence",
-            "detail": f"Confidence set to {confidence} from {total_sources} sources."
+            "step": "verdict",
+            "detail": f"Verdict: {verdict} (confidence {confidence}/100)."
         }
     ]
-
-    if verdict == "VERIFIED":
-
-        reason = "Supporting sources discovered online."
-
-    elif contradiction_detected:
-
-        reason = "Contradictory evidence detected during debunk search."
-
-    else:
-
-        reason = "Evidence is weak or mixed."
 
     return {
         "claim": claim_text,
